@@ -69,6 +69,7 @@ type ApproveBookingRequest struct {
 type CheckInCheckOutRequest struct {
 	ActualCheckInTime  *string `json:"actualCheckInTime"`
 	ActualCheckOutTime *string `json:"actualCheckOutTime"`
+	MarkComplete        bool    `json:"markComplete"`
 }
 
 type RejectBookingRequest struct {

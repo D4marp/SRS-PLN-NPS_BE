@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS feedbacks (
     user_id             VARCHAR(36) NOT NULL,
     satisfaction_level  VARCHAR(20) NOT NULL,
     reason              TEXT NOT NULL,
+    complaint_items     TEXT NULL,
+    complaint_other     TEXT NULL,
     created_at          BIGINT NOT NULL,
     UNIQUE KEY unique_booking_feedback (booking_id),
     FOREIGN KEY (booking_id) REFERENCES bookings(id) ON DELETE CASCADE,

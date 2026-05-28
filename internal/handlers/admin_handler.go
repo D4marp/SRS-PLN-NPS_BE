@@ -126,18 +126,14 @@ func (h *AdminHandler) GetAdminBookings(c *gin.Context) {
 }
 
 func (h *AdminHandler) loadFeedback(bookingID string) (*models.Feedback, error) {
-	var feedback models.Feedback
-	err := h.db.QueryRowContext(context.Background(),
-		`SELECT id, booking_id, user_id, satisfaction_level, reason, created_at
-		 FROM feedbacks WHERE booking_id = ?`, bookingID).
-		Scan(&feedback.ID, &feedback.BookingID, &feedback.UserID, &feedback.SatisfactionLevel, &feedback.Reason, &feedback.CreatedAt)
+	feedback, err := loadFeedbackByBookingID(h.db, bookingID)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	return &feedback, nil
+	return feedback, nil
 }
 
 func (h *AdminHandler) ListUsers(c *gin.Context) {

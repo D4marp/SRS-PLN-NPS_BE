@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -42,12 +44,28 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 		return
 	}
 
+	if req.SatisfactionLevel == string(models.SatisfactionUnsatisfied) {
+		complaintOther := ""
+		if req.ComplaintOther != nil {
+			complaintOther = strings.TrimSpace(*req.ComplaintOther)
+		}
+		if len(req.ComplaintItems) == 0 && complaintOther == "" {
+			utils.Error(c, http.StatusBadRequest, "unsatisfied feedback must include at least one complaint item or other note")
+			return
+		}
+	}
+
 	// Verify booking exists and ensure it is eligible for feedback
 	var booking models.Booking
 	var actualCheckOutTime sql.NullString
+	var bookingStatus models.BookingStatus
+	var roomAmenities models.StringSlice
 	err := h.db.QueryRowContext(context.Background(),
-		"SELECT id, user_id, actual_check_out_time FROM bookings WHERE id = ?", bookingID).
-		Scan(&booking.ID, &booking.UserID, &actualCheckOutTime)
+		`SELECT b.id, b.user_id, b.status, b.actual_check_out_time, r.amenities
+		 FROM bookings b
+		 INNER JOIN rooms r ON r.id = b.room_id
+		 WHERE b.id = ?`, bookingID).
+		Scan(&booking.ID, &booking.UserID, &bookingStatus, &actualCheckOutTime, &roomAmenities)
 
 	if err == sql.ErrNoRows {
 		utils.Error(c, http.StatusNotFound, "Booking not found")
@@ -57,9 +75,35 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 		utils.Error(c, http.StatusInternalServerError, "Database error: "+err.Error())
 		return
 	}
-	if !actualCheckOutTime.Valid || actualCheckOutTime.String == "" {
-		utils.Error(c, http.StatusBadRequest, "feedback can only be submitted after checkout")
+	if bookingStatus != models.StatusCompleted || !actualCheckOutTime.Valid || actualCheckOutTime.String == "" {
+		utils.Error(c, http.StatusBadRequest, "feedback can only be submitted after checkout and completed booking")
 		return
+	}
+
+	if req.SatisfactionLevel == string(models.SatisfactionUnsatisfied) && len(req.ComplaintItems) > 0 {
+		allowed := make(map[string]struct{}, len(roomAmenities))
+		for _, amenity := range roomAmenities {
+			normalized := strings.ToLower(strings.TrimSpace(amenity))
+			if normalized != "" {
+				allowed[normalized] = struct{}{}
+			}
+		}
+
+		invalidItems := make([]string, 0)
+		for _, item := range req.ComplaintItems {
+			normalized := strings.ToLower(strings.TrimSpace(item))
+			if normalized == "" {
+				continue
+			}
+			if _, ok := allowed[normalized]; !ok {
+				invalidItems = append(invalidItems, item)
+			}
+		}
+
+		if len(invalidItems) > 0 {
+			utils.Error(c, http.StatusBadRequest, "complaint items must match room facilities: "+strings.Join(invalidItems, ", "))
+			return
+		}
 	}
 
 	// Regular users can only submit feedback for their own booking.
@@ -86,11 +130,24 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 	// Create feedback
 	feedbackID := uuid.New().String()
 	now := time.Now().UnixMilli()
+	complaintItemsJSON, err := json.Marshal(req.ComplaintItems)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "invalid complaint items")
+		return
+	}
+
+	var complaintOtherValue *string
+	if req.ComplaintOther != nil {
+		trimmed := strings.TrimSpace(*req.ComplaintOther)
+		if trimmed != "" {
+			complaintOtherValue = &trimmed
+		}
+	}
 
 	_, err = h.db.ExecContext(context.Background(),
-		`INSERT INTO feedbacks (id, booking_id, user_id, satisfaction_level, reason, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		feedbackID, bookingID, userID, req.SatisfactionLevel, req.Reason, now)
+		`INSERT INTO feedbacks (id, booking_id, user_id, satisfaction_level, reason, complaint_items, complaint_other, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		feedbackID, bookingID, userID, req.SatisfactionLevel, req.Reason, string(complaintItemsJSON), complaintOtherValue, now)
 
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Failed to create feedback: "+err.Error())
@@ -106,6 +163,8 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 		"userId":              userID,
 		"satisfactionLevel":   req.SatisfactionLevel,
 		"reason":              req.Reason,
+		"complaintItems":      req.ComplaintItems,
+		"complaintOther":      complaintOtherValue,
 		"createdAt":           now,
 	})
 }
@@ -115,11 +174,7 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 func (h *FeedbackHandler) GetFeedback(c *gin.Context) {
 	bookingID := c.Param("id")
 
-	var feedback models.Feedback
-	err := h.db.QueryRowContext(context.Background(),
-		`SELECT id, booking_id, user_id, satisfaction_level, reason, created_at
-		 FROM feedbacks WHERE booking_id = ?`, bookingID).
-		Scan(&feedback.ID, &feedback.BookingID, &feedback.UserID, &feedback.SatisfactionLevel, &feedback.Reason, &feedback.CreatedAt)
+	feedback, err := loadFeedbackByBookingID(h.db, bookingID)
 
 	if err == sql.ErrNoRows {
 		utils.Success(c, http.StatusOK, nil)
@@ -152,7 +207,7 @@ func (h *FeedbackHandler) ListFeedbacks(c *gin.Context) {
 	offset := (page - 1) * limit
 
 	rows, err := h.db.QueryContext(context.Background(),
-		`SELECT id, booking_id, user_id, satisfaction_level, reason, created_at
+		`SELECT id, booking_id, user_id, satisfaction_level, reason, complaint_items, complaint_other, created_at
 		 FROM feedbacks ORDER BY created_at DESC LIMIT ? OFFSET ?`,
 		limit, offset)
 
@@ -164,9 +219,8 @@ func (h *FeedbackHandler) ListFeedbacks(c *gin.Context) {
 
 	feedbacks := []models.Feedback{}
 	for rows.Next() {
-		var f models.Feedback
-		if err := rows.Scan(&f.ID, &f.BookingID, &f.UserID, &f.SatisfactionLevel, &f.Reason, &f.CreatedAt); err == nil {
-			feedbacks = append(feedbacks, f)
+		if f, err := scanFeedbackRow(rows); err == nil {
+			feedbacks = append(feedbacks, *f)
 		}
 	}
 
@@ -228,11 +282,7 @@ func (h *FeedbackHandler) broadcastBookings() {
 
 // LoadFeedbackForBooking loads feedback for a single booking
 func (h *FeedbackHandler) LoadFeedbackForBooking(db *sql.DB, bookingID string) (*models.Feedback, error) {
-	var feedback models.Feedback
-	err := db.QueryRowContext(context.Background(),
-		`SELECT id, booking_id, user_id, satisfaction_level, reason, created_at
-		 FROM feedbacks WHERE booking_id = ?`, bookingID).
-		Scan(&feedback.ID, &feedback.BookingID, &feedback.UserID, &feedback.SatisfactionLevel, &feedback.Reason, &feedback.CreatedAt)
+	feedback, err := loadFeedbackByBookingID(db, bookingID)
 
 	if err == sql.ErrNoRows {
 		return nil, nil // No feedback yet
@@ -240,5 +290,5 @@ func (h *FeedbackHandler) LoadFeedbackForBooking(db *sql.DB, bookingID string) (
 	if err != nil {
 		return nil, err
 	}
-	return &feedback, nil
+	return feedback, nil
 }

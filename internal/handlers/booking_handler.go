@@ -156,14 +156,10 @@ func (h *BookingHandler) GetBooking(c *gin.Context) {
 	}
 
 	// Load feedback if it exists
-	var feedback models.Feedback
-	feedbackErr := h.db.QueryRowContext(context.Background(),
-		`SELECT id, booking_id, user_id, satisfaction_level, reason, created_at
-		 FROM feedbacks WHERE booking_id = ?`, id).
-		Scan(&feedback.ID, &feedback.BookingID, &feedback.UserID, &feedback.SatisfactionLevel, &feedback.Reason, &feedback.CreatedAt)
+	feedback, feedbackErr := loadFeedbackByBookingID(h.db, id)
 
 	if feedbackErr == nil {
-		b.Feedback = &feedback
+		b.Feedback = feedback
 	}
 
 	utils.Success(c, http.StatusOK, b)
@@ -497,6 +493,26 @@ func (h *BookingHandler) UpdateCheckInCheckOut(c *gin.Context) {
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "failed to update check-in/check-out times")
 		return
+	}
+
+	// If client requested auto-complete (mobile checkout), and actual check-out provided,
+	// and booking is currently confirmed, mark booking as completed.
+	if req.MarkComplete && actualCheckOut != "" && status == models.StatusConfirmed {
+		now2 := time.Now().UnixMilli()
+		_, err2 := h.db.ExecContext(context.Background(),
+			"UPDATE bookings SET status='completed', updated_at=? WHERE id = ?", now2, id)
+		if err2 == nil {
+			h.recordHistory(id, string(status), string(models.StatusCompleted), currentUserID, "auto-completed by user on checkout")
+			go h.broadcastBookings()
+			utils.SuccessMessage(c, http.StatusOK, "check-in/check-out updated and booking completed", gin.H{
+				"id":                   id,
+				"actualCheckInTime":     actualCheckIn,
+				"actualCheckOutTime":    actualCheckOut,
+				"actualDurationMinutes": actualDurationMinutes.Int64,
+				"status":               "completed",
+			})
+			return
+		}
 	}
 
 	go h.broadcastBookings()
