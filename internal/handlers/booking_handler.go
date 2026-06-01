@@ -235,6 +235,8 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		RoomImageURL:   &roomImageURL,
 		BookedForName:   req.BookedForName,
 		BookedForCompany: req.BookedForCompany,
+		ParaPihak:      req.ParaPihak,
+		Divisi:         req.Divisi,
 		UserName:       &uName,
 		UserEmail:      &uEmail,
 		CreatedAt:      now,
@@ -244,14 +246,14 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		`INSERT INTO bookings (id, user_id, room_id, booking_date, check_in_time, check_out_time,
 		                      number_of_guests, status, purpose,
 		                      room_name, room_location, room_image_url,
-		                      booked_for_name, booked_for_company,
+		                      booked_for_name, booked_for_company, para_pihak, divisi,
 		                      user_name, user_email, created_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		booking.ID, booking.UserID, booking.RoomID, booking.BookingDate,
 		booking.CheckInTime, booking.CheckOutTime, booking.NumberOfGuests,
 		booking.Status, booking.Purpose,
 		booking.RoomName, booking.RoomLocation, booking.RoomImageURL,
-		booking.BookedForName, booking.BookedForCompany,
+		booking.BookedForName, booking.BookedForCompany, booking.ParaPihak, booking.Divisi,
 		booking.UserName, booking.UserEmail, booking.CreatedAt,
 	)
 	if err != nil {

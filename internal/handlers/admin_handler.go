@@ -62,7 +62,7 @@ func (h *AdminHandler) GetAdminBookings(c *gin.Context) {
 	                 b.check_in_time, b.check_out_time, b.number_of_guests,
 	                 b.status, b.purpose, b.rejection_reason, b.approved_by, b.approved_at,
 	                 b.room_name, b.room_location, b.room_image_url,
-	                 b.booked_for_name, b.booked_for_company,
+	                 b.booked_for_name, b.booked_for_company, b.para_pihak, b.divisi,
 	                 b.actual_check_in_time, b.actual_check_out_time, b.actual_duration_minutes,
 	                 b.user_name, b.user_email, b.created_at, b.updated_at,
 	                 reviewer.name AS reviewer_name
@@ -111,7 +111,7 @@ func (h *AdminHandler) GetAdminBookings(c *gin.Context) {
 			&b.CheckInTime, &b.CheckOutTime, &b.NumberOfGuests,
 			&b.Status, &b.Purpose, &b.RejectionReason, &b.ApprovedBy, &b.ApprovedAt,
 			&b.RoomName, &b.RoomLocation, &b.RoomImageURL,
-			&b.BookedForName, &b.BookedForCompany,
+			&b.BookedForName, &b.BookedForCompany, &b.ParaPihak, &b.Divisi,
 			&b.ActualCheckInTime, &b.ActualCheckOutTime, &b.ActualDurationMinutes,
 			&b.UserName, &b.UserEmail, &b.CreatedAt, &b.UpdatedAt,
 			&reviewerName,
