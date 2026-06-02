@@ -122,5 +122,49 @@ func RunMigrations(db *sql.DB) error {
 		fmt.Printf("✓ Migration applied: %s\n", entry.Name())
 	}
 
+	if err := ensureBookingPihakColumns(db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureBookingPihakColumns(db *sql.DB) error {
+	if err := ensureColumn(db, "bookings", "pihak_1",
+		"ALTER TABLE bookings ADD COLUMN pihak_1 VARCHAR(255) NULL AFTER booked_for_company"); err != nil {
+		return err
+	}
+	if err := ensureColumn(db, "bookings", "pihak_2",
+		"ALTER TABLE bookings ADD COLUMN pihak_2 VARCHAR(255) NULL AFTER pihak_1"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`
+		UPDATE bookings
+		SET pihak_1 = COALESCE(pihak_1, para_pihak),
+		    pihak_2 = COALESCE(pihak_2, divisi)
+		WHERE pihak_1 IS NULL OR pihak_2 IS NULL
+	`); err != nil {
+		return fmt.Errorf("backfill booking pihak columns: %w", err)
+	}
+	return nil
+}
+
+func ensureColumn(db *sql.DB, tableName, columnName, alterSQL string) error {
+	var count int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM information_schema.columns
+		WHERE table_schema = DATABASE()
+		  AND table_name = ?
+		  AND column_name = ?
+	`, tableName, columnName).Scan(&count); err != nil {
+		return fmt.Errorf("check column %s.%s: %w", tableName, columnName, err)
+	}
+	if count > 0 {
+		return nil
+	}
+	if _, err := db.Exec(alterSQL); err != nil {
+		return fmt.Errorf("add column %s.%s: %w", tableName, columnName, err)
+	}
 	return nil
 }

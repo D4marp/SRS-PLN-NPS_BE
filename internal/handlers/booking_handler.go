@@ -48,6 +48,8 @@ const bookingCols = `
 	rejection_reason, approved_by, approved_at,
 	room_name, room_location, room_image_url,
 	booked_for_name, booked_for_company,
+	COALESCE(pihak_1, para_pihak) AS pihak_1,
+	COALESCE(pihak_2, divisi) AS pihak_2,
 	actual_check_in_time, actual_check_out_time, actual_duration_minutes,
 	user_name, user_email,
 	created_at, updated_at
@@ -63,6 +65,7 @@ func scanBooking(rows interface {
 		&b.RejectionReason, &b.ApprovedBy, &b.ApprovedAt,
 		&b.RoomName, &b.RoomLocation, &b.RoomImageURL,
 		&b.BookedForName, &b.BookedForCompany,
+		&b.Pihak1, &b.Pihak2,
 		&b.ActualCheckInTime, &b.ActualCheckOutTime, &b.ActualDurationMinutes,
 		&b.UserName, &b.UserEmail,
 		&b.CreatedAt, &b.UpdatedAt,
@@ -220,40 +223,49 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		roomImageURL = room.ImageURLs[0]
 	}
 
+	pihak1 := req.Pihak1
+	if pihak1 == nil {
+		pihak1 = req.ParaPihak
+	}
+	pihak2 := req.Pihak2
+	if pihak2 == nil {
+		pihak2 = req.Divisi
+	}
+
 	booking := models.Booking{
-		ID:             uuid.New().String(),
-		UserID:         userID,
-		RoomID:         req.RoomID,
-		BookingDate:    req.BookingDate,
-		CheckInTime:    req.CheckInTime,
-		CheckOutTime:   req.CheckOutTime,
-		NumberOfGuests: req.NumberOfGuests,
-		Status:         models.StatusPending,
-		Purpose:        req.Purpose,
-		RoomName:       &room.Name,
-		RoomLocation:   &room.Location,
-		RoomImageURL:   &roomImageURL,
-		BookedForName:   req.BookedForName,
+		ID:               uuid.New().String(),
+		UserID:           userID,
+		RoomID:           req.RoomID,
+		BookingDate:      req.BookingDate,
+		CheckInTime:      req.CheckInTime,
+		CheckOutTime:     req.CheckOutTime,
+		NumberOfGuests:   req.NumberOfGuests,
+		Status:           models.StatusPending,
+		Purpose:          req.Purpose,
+		RoomName:         &room.Name,
+		RoomLocation:     &room.Location,
+		RoomImageURL:     &roomImageURL,
+		BookedForName:    req.BookedForName,
 		BookedForCompany: req.BookedForCompany,
-		ParaPihak:      req.ParaPihak,
-		Divisi:         req.Divisi,
-		UserName:       &uName,
-		UserEmail:      &uEmail,
-		CreatedAt:      now,
+		Pihak1:           pihak1,
+		Pihak2:           pihak2,
+		UserName:         &uName,
+		UserEmail:        &uEmail,
+		CreatedAt:        now,
 	}
 
 	_, err = h.db.ExecContext(context.Background(),
 		`INSERT INTO bookings (id, user_id, room_id, booking_date, check_in_time, check_out_time,
 		                      number_of_guests, status, purpose,
 		                      room_name, room_location, room_image_url,
-		                      booked_for_name, booked_for_company, para_pihak, divisi,
+		                      booked_for_name, booked_for_company, pihak_1, pihak_2,
 		                      user_name, user_email, created_at)
 		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		booking.ID, booking.UserID, booking.RoomID, booking.BookingDate,
 		booking.CheckInTime, booking.CheckOutTime, booking.NumberOfGuests,
 		booking.Status, booking.Purpose,
 		booking.RoomName, booking.RoomLocation, booking.RoomImageURL,
-		booking.BookedForName, booking.BookedForCompany, booking.ParaPihak, booking.Divisi,
+		booking.BookedForName, booking.BookedForCompany, booking.Pihak1, booking.Pihak2,
 		booking.UserName, booking.UserEmail, booking.CreatedAt,
 	)
 	if err != nil {
@@ -378,9 +390,8 @@ func (h *BookingHandler) CompleteBooking(c *gin.Context) {
 	adminID := c.GetString("userID")
 
 	var status models.BookingStatus
-	var actualCheckOut sql.NullString
 	err := h.db.QueryRowContext(context.Background(),
-		"SELECT status, actual_check_out_time FROM bookings WHERE id = ?", id).Scan(&status, &actualCheckOut)
+		"SELECT status FROM bookings WHERE id = ?", id).Scan(&status)
 	if err != nil {
 		utils.Error(c, http.StatusNotFound, "booking not found")
 		return
@@ -389,14 +400,13 @@ func (h *BookingHandler) CompleteBooking(c *gin.Context) {
 		utils.Error(c, http.StatusBadRequest, "only confirmed bookings can be completed")
 		return
 	}
-	if !actualCheckOut.Valid || actualCheckOut.String == "" {
-		utils.Error(c, http.StatusBadRequest, "booking must be checked out before completion")
-		return
-	}
 
 	now := time.Now().UnixMilli()
-	h.db.ExecContext(context.Background(),
-		"UPDATE bookings SET status='completed', updated_at=? WHERE id=?", now, id)
+	if _, err := h.db.ExecContext(context.Background(),
+		"UPDATE bookings SET status='completed', updated_at=? WHERE id=?", now, id); err != nil {
+		utils.Error(c, http.StatusInternalServerError, "failed to complete booking")
+		return
+	}
 
 	h.recordHistory(id, "confirmed", "completed", adminID, "marked completed by admin")
 	go h.broadcastBookings()
@@ -507,11 +517,11 @@ func (h *BookingHandler) UpdateCheckInCheckOut(c *gin.Context) {
 			h.recordHistory(id, string(status), string(models.StatusCompleted), currentUserID, "auto-completed by user on checkout")
 			go h.broadcastBookings()
 			utils.SuccessMessage(c, http.StatusOK, "check-in/check-out updated and booking completed", gin.H{
-				"id":                   id,
+				"id":                    id,
 				"actualCheckInTime":     actualCheckIn,
 				"actualCheckOutTime":    actualCheckOut,
 				"actualDurationMinutes": actualDurationMinutes.Int64,
-				"status":               "completed",
+				"status":                "completed",
 			})
 			return
 		}
@@ -519,7 +529,7 @@ func (h *BookingHandler) UpdateCheckInCheckOut(c *gin.Context) {
 
 	go h.broadcastBookings()
 	utils.SuccessMessage(c, http.StatusOK, "check-in/check-out updated", gin.H{
-		"id":                   id,
+		"id":                    id,
 		"actualCheckInTime":     actualCheckIn,
 		"actualCheckOutTime":    actualCheckOut,
 		"actualDurationMinutes": actualDurationMinutes.Int64,
@@ -552,7 +562,7 @@ func (h *BookingHandler) GetRoomBookings(c *gin.Context) {
 
 	bookings := []models.Booking{}
 	now := time.Now()
-	
+
 	for rows.Next() {
 		var b models.Booking
 		if err := scanBooking(rows, &b); err == nil {
@@ -561,26 +571,26 @@ func (h *BookingHandler) GetRoomBookings(c *gin.Context) {
 				bookingDate := time.UnixMilli(b.BookingDate)
 				bookingDateOnly := time.Date(bookingDate.Year(), bookingDate.Month(), bookingDate.Day(), 0, 0, 0, 0, bookingDate.Location())
 				todayOnly := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-				
+
 				// Only auto check-in for today's bookings
 				if bookingDateOnly.Equal(todayOnly) {
 					// Parse scheduled check-in time
 					scheduledCheckIn, err := time.Parse("15:04", b.CheckInTime)
 					if err == nil {
 						// Create datetime with check-in time
-						checkInDateTime := time.Date(now.Year(), now.Month(), now.Day(), 
+						checkInDateTime := time.Date(now.Year(), now.Month(), now.Day(),
 							scheduledCheckIn.Hour(), scheduledCheckIn.Minute(), 0, 0, now.Location())
-						
+
 						// If current time >= check-in time, auto-check-in
 						if now.After(checkInDateTime) || now.Equal(checkInDateTime) {
 							// Auto set actual check-in time to scheduled check-in time
 							actualCheckInTime := b.CheckInTime
 							updateErr := h.db.QueryRowContext(context.Background(),
-								`UPDATE bookings SET actual_check_in_time = ?, updated_at = ? 
+								`UPDATE bookings SET actual_check_in_time = ?, updated_at = ?
 								 WHERE id = ? AND (actual_check_in_time IS NULL OR actual_check_in_time = '')
 								 RETURNING id`,
 								actualCheckInTime, time.Now().UnixMilli(), b.ID).Scan(&b.ID)
-							
+
 							if updateErr == nil {
 								// Update in-memory booking
 								b.ActualCheckInTime = &actualCheckInTime

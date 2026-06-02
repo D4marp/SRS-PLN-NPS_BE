@@ -31,35 +31,37 @@ type Booking struct {
 	ApprovedBy      *string       `json:"approvedBy" db:"approved_by"`
 	ApprovedAt      *int64        `json:"approvedAt" db:"approved_at"`
 	// Denormalized fields (same as Firestore behavior)
-	RoomName         *string `json:"roomName" db:"room_name"`
-	RoomLocation     *string `json:"roomLocation" db:"room_location"`
-	RoomImageURL     *string `json:"roomImageUrl" db:"room_image_url"`
-	BookedForName    *string `json:"bookedForName" db:"booked_for_name"`
-	BookedForCompany *string `json:"bookedForCompany" db:"booked_for_company"`
-	ParaPihak        *string `json:"paraPihak" db:"para_pihak"`
-	Divisi           *string `json:"divisi" db:"divisi"`
-	ActualCheckInTime    *string `json:"actualCheckInTime" db:"actual_check_in_time"`
-	ActualCheckOutTime   *string `json:"actualCheckOutTime" db:"actual_check_out_time"`
+	RoomName              *string `json:"roomName" db:"room_name"`
+	RoomLocation          *string `json:"roomLocation" db:"room_location"`
+	RoomImageURL          *string `json:"roomImageUrl" db:"room_image_url"`
+	BookedForName         *string `json:"bookedForName" db:"booked_for_name"`
+	BookedForCompany      *string `json:"bookedForCompany" db:"booked_for_company"`
+	Pihak1                *string `json:"pihak1" db:"pihak_1"`
+	Pihak2                *string `json:"pihak2" db:"pihak_2"`
+	ActualCheckInTime     *string `json:"actualCheckInTime" db:"actual_check_in_time"`
+	ActualCheckOutTime    *string `json:"actualCheckOutTime" db:"actual_check_out_time"`
 	ActualDurationMinutes *int    `json:"actualDurationMinutes" db:"actual_duration_minutes"`
-	UserName         *string `json:"userName" db:"user_name"`
-	UserEmail        *string `json:"userEmail" db:"user_email"`
-	CreatedAt        int64   `json:"createdAt" db:"created_at"`
-	UpdatedAt        *int64  `json:"updatedAt" db:"updated_at"`
+	UserName              *string `json:"userName" db:"user_name"`
+	UserEmail             *string `json:"userEmail" db:"user_email"`
+	CreatedAt             int64   `json:"createdAt" db:"created_at"`
+	UpdatedAt             *int64  `json:"updatedAt" db:"updated_at"`
 	// Feedback (optional, loaded separately)
-	Feedback         *Feedback `json:"feedback,omitempty"`
+	Feedback *Feedback `json:"feedback,omitempty"`
 }
 
 type CreateBookingRequest struct {
-	RoomID         string  `json:"roomId" binding:"required"`
-	BookingDate    int64   `json:"bookingDate" binding:"required"`
-	CheckInTime    string  `json:"checkInTime" binding:"required"`
-	CheckOutTime   string  `json:"checkOutTime" binding:"required"`
-	NumberOfGuests int     `json:"numberOfGuests" binding:"required,min=1"`
-	BookedForName  *string `json:"bookedForName"`
+	RoomID           string  `json:"roomId" binding:"required"`
+	BookingDate      int64   `json:"bookingDate" binding:"required"`
+	CheckInTime      string  `json:"checkInTime" binding:"required"`
+	CheckOutTime     string  `json:"checkOutTime" binding:"required"`
+	NumberOfGuests   int     `json:"numberOfGuests" binding:"required,min=1"`
+	BookedForName    *string `json:"bookedForName"`
 	BookedForCompany *string `json:"bookedForCompany"`
-	ParaPihak      *string `json:"paraPihak"`
-	Divisi         *string `json:"divisi"`
-	Purpose        *string `json:"purpose"`
+	Pihak1           *string `json:"pihak1"`
+	Pihak2           *string `json:"pihak2"`
+	ParaPihak        *string `json:"paraPihak"`
+	Divisi           *string `json:"divisi"`
+	Purpose          *string `json:"purpose"`
 }
 
 type ApproveBookingRequest struct {
@@ -69,7 +71,7 @@ type ApproveBookingRequest struct {
 type CheckInCheckOutRequest struct {
 	ActualCheckInTime  *string `json:"actualCheckInTime"`
 	ActualCheckOutTime *string `json:"actualCheckOutTime"`
-	MarkComplete        bool    `json:"markComplete"`
+	MarkComplete       bool    `json:"markComplete"`
 }
 
 type RejectBookingRequest struct {
