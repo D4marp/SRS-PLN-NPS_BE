@@ -38,6 +38,7 @@ type Booking struct {
 	BookedForCompany      *string `json:"bookedForCompany" db:"booked_for_company"`
 	Pihak1                *string `json:"pihak1" db:"pihak_1"`
 	Pihak2                *string `json:"pihak2" db:"pihak_2"`
+	PicInput              *string `json:"picInput" db:"pic_input"`
 	ActualCheckInTime     *string `json:"actualCheckInTime" db:"actual_check_in_time"`
 	ActualCheckOutTime    *string `json:"actualCheckOutTime" db:"actual_check_out_time"`
 	ActualDurationMinutes *int    `json:"actualDurationMinutes" db:"actual_duration_minutes"`
@@ -62,6 +63,7 @@ type CreateBookingRequest struct {
 	ParaPihak        *string `json:"paraPihak"`
 	Divisi           *string `json:"divisi"`
 	Purpose          *string `json:"purpose"`
+	PicInput         *string `json:"picInput"`
 }
 
 type ApproveBookingRequest struct {

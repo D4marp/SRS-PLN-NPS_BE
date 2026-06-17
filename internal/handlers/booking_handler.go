@@ -50,6 +50,7 @@ const bookingCols = `
 	booked_for_name, booked_for_company,
 	COALESCE(pihak_1, para_pihak) AS pihak_1,
 	COALESCE(pihak_2, divisi) AS pihak_2,
+	pic_input,
 	actual_check_in_time, actual_check_out_time, actual_duration_minutes,
 	user_name, user_email,
 	created_at, updated_at
@@ -65,7 +66,7 @@ func scanBooking(rows interface {
 		&b.RejectionReason, &b.ApprovedBy, &b.ApprovedAt,
 		&b.RoomName, &b.RoomLocation, &b.RoomImageURL,
 		&b.BookedForName, &b.BookedForCompany,
-		&b.Pihak1, &b.Pihak2,
+		&b.Pihak1, &b.Pihak2, &b.PicInput,
 		&b.ActualCheckInTime, &b.ActualCheckOutTime, &b.ActualDurationMinutes,
 		&b.UserName, &b.UserEmail,
 		&b.CreatedAt, &b.UpdatedAt,
@@ -208,7 +209,7 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		req.RoomID, req.BookingDate, req.CheckOutTime, req.CheckInTime,
 	).Scan(&conflictCount)
 	if conflictCount > 0 {
-		utils.Error(c, http.StatusConflict, "time slot is unavailable or pending approval")
+		utils.Error(c, http.StatusConflict, "Attention : Time Slot Is Unavailable or Pending Approval ! ")
 		return
 	}
 
@@ -249,6 +250,7 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		BookedForCompany: req.BookedForCompany,
 		Pihak1:           pihak1,
 		Pihak2:           pihak2,
+		PicInput:         req.PicInput,
 		UserName:         &uName,
 		UserEmail:        &uEmail,
 		CreatedAt:        now,
@@ -258,14 +260,15 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		`INSERT INTO bookings (id, user_id, room_id, booking_date, check_in_time, check_out_time,
 		                      number_of_guests, status, purpose,
 		                      room_name, room_location, room_image_url,
-		                      booked_for_name, booked_for_company, pihak_1, pihak_2,
+		                      booked_for_name, booked_for_company, pihak_1, pihak_2, pic_input,
 		                      user_name, user_email, created_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		booking.ID, booking.UserID, booking.RoomID, booking.BookingDate,
 		booking.CheckInTime, booking.CheckOutTime, booking.NumberOfGuests,
 		booking.Status, booking.Purpose,
 		booking.RoomName, booking.RoomLocation, booking.RoomImageURL,
 		booking.BookedForName, booking.BookedForCompany, booking.Pihak1, booking.Pihak2,
+		booking.PicInput,
 		booking.UserName, booking.UserEmail, booking.CreatedAt,
 	)
 	if err != nil {

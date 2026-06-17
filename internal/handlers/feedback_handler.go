@@ -219,15 +219,50 @@ func (h *FeedbackHandler) ListFeedbacks(c *gin.Context) {
 }
 
 // GetSatisfactionStats returns satisfaction statistics (admin only)
-// GET /api/feedbacks/stats
+// GET /api/feedbacks/stats?year=2025&month=6
 func (h *FeedbackHandler) GetSatisfactionStats(c *gin.Context) {
+	year := strings.TrimSpace(c.Query("year"))
+	month := strings.TrimSpace(c.Query("month"))
+
+	conditions := []string{}
+	args := []interface{}{}
+
+	if year != "" {
+		if y, err := strconv.Atoi(year); err == nil && y > 0 {
+			conditions = append(conditions, "YEAR(FROM_UNIXTIME(created_at / 1000)) = ?")
+			args = append(args, y)
+		}
+	}
+	if month != "" {
+		if m, err := strconv.Atoi(month); err == nil && m >= 1 && m <= 12 {
+			conditions = append(conditions, "MONTH(FROM_UNIXTIME(created_at / 1000)) = ?")
+			args = append(args, m)
+		}
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = " WHERE " + strings.Join(conditions, " AND ")
+	}
+
 	var satisfied int
 	var unsatisfied int
 
-	h.db.QueryRowContext(context.Background(),
-		"SELECT COUNT(*) FROM feedbacks WHERE satisfaction_level = 'satisfied'").Scan(&satisfied)
-	h.db.QueryRowContext(context.Background(),
-		"SELECT COUNT(*) FROM feedbacks WHERE satisfaction_level = 'unsatisfied'").Scan(&unsatisfied)
+	satisfiedQuery := "SELECT COUNT(*) FROM feedbacks"
+	unsatisfiedQuery := "SELECT COUNT(*) FROM feedbacks"
+	satisfiedArgs := append([]interface{}{}, args...)
+	unsatisfiedArgs := append([]interface{}{}, args...)
+
+	if len(conditions) > 0 {
+		satisfiedQuery += whereClause + " AND satisfaction_level = 'satisfied'"
+		unsatisfiedQuery += whereClause + " AND satisfaction_level = 'unsatisfied'"
+	} else {
+		satisfiedQuery += " WHERE satisfaction_level = 'satisfied'"
+		unsatisfiedQuery += " WHERE satisfaction_level = 'unsatisfied'"
+	}
+
+	h.db.QueryRowContext(context.Background(), satisfiedQuery, satisfiedArgs...).Scan(&satisfied)
+	h.db.QueryRowContext(context.Background(), unsatisfiedQuery, unsatisfiedArgs...).Scan(&unsatisfied)
 
 	total := satisfied + unsatisfied
 	satisfactionRate := 0.0
