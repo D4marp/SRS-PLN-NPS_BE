@@ -18,6 +18,7 @@ type ClientStatus struct {
 	ID            string `json:"id"`
 	Type          string `json:"type"`
 	Name          string `json:"name"`
+	RoomName      string `json:"roomName"`
 	IP            string `json:"ip"`
 	UserAgent     string `json:"userAgent"`
 	Origin        string `json:"origin"`
@@ -66,6 +67,13 @@ func (m *Monitor) Record(c *gin.Context, req PingRequest) ClientStatus {
 		clientID = inferredClientID(clientType, ip, ua)
 	}
 	clientName := firstNonEmpty(req.ClientName, c.GetHeader("X-Client-Name"), c.Query("clientName"), defaultName(clientType, ip))
+	roomName := ""
+	if clientType == "mobile" {
+		roomName = roomNameByIP(ip)
+	}
+	if roomName != "" && clientName == "Mobile App" {
+		clientName = roomName
+	}
 	key := clientType + ":" + clientID
 
 	m.mu.Lock()
@@ -77,6 +85,7 @@ func (m *Monitor) Record(c *gin.Context, req PingRequest) ClientStatus {
 			ID:        clientID,
 			Type:      clientType,
 			Name:      clientName,
+			RoomName:  roomName,
 			IP:        ip,
 			UserAgent: ua,
 			Origin:    origin,
@@ -85,6 +94,7 @@ func (m *Monitor) Record(c *gin.Context, req PingRequest) ClientStatus {
 	}
 
 	status.Name = clientName
+	status.RoomName = roomName
 	status.IP = ip
 	status.UserAgent = ua
 	status.Origin = origin
@@ -183,6 +193,9 @@ func defaultName(clientType, ip string) string {
 	case "web":
 		return "Admin Web"
 	case "mobile":
+		if room := roomNameByIP(ip); room != "" {
+			return room
+		}
 		return "Mobile App"
 	default:
 		if ip != "" {
@@ -190,6 +203,20 @@ func defaultName(clientType, ip string) string {
 		}
 		return "API Client"
 	}
+}
+
+func roomNameByIP(ip string) string {
+	rooms := map[string]string{
+		"10.7.41.44": "governor",
+		"10.7.41.37": "boiler",
+		"10.7.41.26": "msv",
+		"10.7.41.59": "tab reseptionis",
+		"10.7.41.35": "generator",
+		"10.7.41.33": "generator2",
+		"10.7.41.60": "turbin",
+		"10.7.41.61": "hall",
+	}
+	return rooms[ip]
 }
 
 func inferredClientID(clientType, ip, ua string) string {
