@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/bookify-rooms/backend/internal/config"
+	"github.com/bookify-rooms/backend/internal/health"
 	"github.com/bookify-rooms/backend/internal/middleware"
 	"github.com/bookify-rooms/backend/internal/utils"
 )
@@ -51,8 +52,10 @@ func (s *Server) logListenInfo(addr string) {
 
 func (s *Server) setupRouter() {
 	r := gin.Default()
+	healthMonitor := health.NewMonitor()
 
 	r.Use(middleware.CORS(s.cfg.AllowedOrigins))
+	r.Use(healthMonitor.Middleware())
 	r.Static("/uploads", s.cfg.UploadsDir)
 
 	r.GET("/health", func(c *gin.Context) {
@@ -61,6 +64,18 @@ func (s *Server) setupRouter() {
 			"service": "bookify-rooms-backend",
 			"baseUrl": s.cfg.BaseURL,
 			"lanUrls": utils.LocalAPIURLs(s.cfg.Port),
+			"clients": healthMonitor.Summary(),
+		})
+	})
+	r.GET("/health/clients", func(c *gin.Context) {
+		c.JSON(200, healthMonitor.Snapshot())
+	})
+	r.POST("/health/ping", func(c *gin.Context) {
+		var req health.PingRequest
+		_ = c.ShouldBindJSON(&req)
+		c.JSON(200, gin.H{
+			"status": "ok",
+			"client": healthMonitor.Record(c, req),
 		})
 	})
 
