@@ -125,8 +125,34 @@ func RunMigrations(db *sql.DB) error {
 	if err := ensureBookingPihakColumns(db); err != nil {
 		return err
 	}
+	if err := ensureBookingPicInputColumn(db); err != nil {
+		return err
+	}
+	if err := ensureBookingEndDateColumn(db); err != nil {
+		return err
+	}
 
 	return nil
+}
+
+func ensureBookingEndDateColumn(db *sql.DB) error {
+	if err := ensureColumn(db, "bookings", "end_booking_date",
+		"ALTER TABLE bookings ADD COLUMN end_booking_date BIGINT NULL AFTER booking_date"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`
+		UPDATE bookings
+		SET end_booking_date = booking_date
+		WHERE end_booking_date IS NULL
+	`); err != nil {
+		return fmt.Errorf("backfill booking end date: %w", err)
+	}
+	return nil
+}
+
+func ensureBookingPicInputColumn(db *sql.DB) error {
+	return ensureColumn(db, "bookings", "pic_input",
+		"ALTER TABLE bookings ADD COLUMN pic_input VARCHAR(255) NULL AFTER pihak_2")
 }
 
 func ensureBookingPihakColumns(db *sql.DB) error {

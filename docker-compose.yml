@@ -42,12 +42,22 @@ services:
       DB_NAME: ${DB_NAME:-bookify}
       JWT_SECRET: ${JWT_SECRET:-your-super-secret-key-change-in-production}
       JWT_EXPIRY: ${JWT_EXPIRY:-168h}
+      HOST: 0.0.0.0
       PORT: 8080
       UPLOADS_DIR: ./uploads
       BASE_URL: ${BASE_URL:-http://localhost:8080}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-superadmin@bookify.local}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-superadmin123}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@bookify.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ADMIN_NAME: ${ADMIN_NAME:-Admin PLN}
+      BOOKING_EMAIL: ${BOOKING_EMAIL:-booking@bookify.local}
+      BOOKING_PASSWORD: ${BOOKING_PASSWORD:-booking123}
+      BOOKING_NAME: ${BOOKING_NAME:-Petugas Booking PLN}
+      SUPERADMIN2_EMAIL: ${SUPERADMIN2_EMAIL:-superadmin.pln@bookify.local}
+      SUPERADMIN2_PASSWORD: ${SUPERADMIN2_PASSWORD:-superadmin123}
+      SUPERADMIN2_NAME: ${SUPERADMIN2_NAME:-Super Admin PLN}
     ports:
       - "${API_PORT:-8080}:8080"
     volumes:

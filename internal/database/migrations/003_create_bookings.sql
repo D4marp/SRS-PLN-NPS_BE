@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS bookings (
     user_id          VARCHAR(36) NOT NULL,
     room_id          VARCHAR(36) NOT NULL,
     booking_date     BIGINT NOT NULL,
+    end_booking_date BIGINT,
     check_in_time    VARCHAR(5) NOT NULL,
     check_out_time   VARCHAR(5) NOT NULL,
     number_of_guests INT NOT NULL,

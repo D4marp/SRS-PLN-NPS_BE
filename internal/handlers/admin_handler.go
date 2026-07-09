@@ -58,13 +58,14 @@ func (h *AdminHandler) GetAdminBookings(c *gin.Context) {
 	fromDate := c.Query("fromDate")
 	toDate := c.Query("toDate")
 
-	query := `SELECT b.id, b.user_id, b.room_id, b.booking_date,
+	query := `SELECT b.id, b.user_id, b.room_id, b.booking_date, COALESCE(b.end_booking_date, b.booking_date) AS end_booking_date,
 	                 b.check_in_time, b.check_out_time, b.number_of_guests,
 	                 b.status, b.purpose, b.rejection_reason, b.approved_by, b.approved_at,
 	                 b.room_name, b.room_location, b.room_image_url,
 	                 b.booked_for_name, b.booked_for_company,
 	                 COALESCE(b.pihak_1, b.para_pihak) AS pihak_1,
 	                 COALESCE(b.pihak_2, b.divisi) AS pihak_2,
+	                 b.pic_input,
 	                 b.actual_check_in_time, b.actual_check_out_time, b.actual_duration_minutes,
 	                 b.user_name, b.user_email, b.created_at, b.updated_at,
 	                 reviewer.name AS reviewer_name
@@ -82,7 +83,7 @@ func (h *AdminHandler) GetAdminBookings(c *gin.Context) {
 		args = append(args, roomID)
 	}
 	if fromDate != "" {
-		query += " AND b.booking_date >= ?"
+		query += " AND COALESCE(b.end_booking_date, b.booking_date) >= ?"
 		args = append(args, fromDate)
 	}
 	if toDate != "" {
@@ -109,11 +110,12 @@ func (h *AdminHandler) GetAdminBookings(c *gin.Context) {
 		var b models.Booking
 		var reviewerName *string
 		if err := rows.Scan(
-			&b.ID, &b.UserID, &b.RoomID, &b.BookingDate,
+			&b.ID, &b.UserID, &b.RoomID, &b.BookingDate, &b.EndBookingDate,
 			&b.CheckInTime, &b.CheckOutTime, &b.NumberOfGuests,
 			&b.Status, &b.Purpose, &b.RejectionReason, &b.ApprovedBy, &b.ApprovedAt,
 			&b.RoomName, &b.RoomLocation, &b.RoomImageURL,
 			&b.BookedForName, &b.BookedForCompany, &b.Pihak1, &b.Pihak2,
+			&b.PicInput,
 			&b.ActualCheckInTime, &b.ActualCheckOutTime, &b.ActualDurationMinutes,
 			&b.UserName, &b.UserEmail, &b.CreatedAt, &b.UpdatedAt,
 			&reviewerName,

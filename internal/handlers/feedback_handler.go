@@ -23,6 +23,15 @@ type FeedbackHandler struct {
 	manager *realtime.Manager
 }
 
+type createFeedbackPayload struct {
+	BookingID         string   `json:"bookingId"`
+	BookingIDSnake    string   `json:"booking_id"`
+	SatisfactionLevel string   `json:"satisfactionLevel" binding:"required,oneof=satisfied unsatisfied"`
+	Reason            string   `json:"reason" binding:"required"`
+	ComplaintItems    []string `json:"complaintItems"`
+	ComplaintOther    *string  `json:"complaintOther"`
+}
+
 func NewFeedbackHandler(db *sql.DB, manager *realtime.Manager) *FeedbackHandler {
 	return &FeedbackHandler{db: db, manager: manager}
 }
@@ -34,11 +43,6 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 	userID := c.GetString("userID")
 	role := c.GetString("role")
 
-	if userID == "" {
-		utils.Error(c, http.StatusUnauthorized, "User not authenticated")
-		return
-	}
-
 	var req models.CreateFeedbackRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.Error(c, http.StatusBadRequest, "Invalid request: "+err.Error())
@@ -46,7 +50,7 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 	}
 
 	// DEBUG: Log the request
-	log.Printf("📝 Feedback request - Satisfaction: %s, Complaints: %v, Other: %v", 
+	log.Printf("📝 Feedback request - Satisfaction: %s, Complaints: %v, Other: %v",
 		req.SatisfactionLevel, req.ComplaintItems, req.ComplaintOther)
 
 	if req.SatisfactionLevel == string(models.SatisfactionUnsatisfied) {
@@ -73,6 +77,10 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 	if err != nil {
 		utils.Error(c, http.StatusInternalServerError, "Database error: "+err.Error())
 		return
+	}
+
+	if userID == "" {
+		userID = booking.UserID
 	}
 
 	// Regular users can only submit feedback for their own booking.
@@ -139,14 +147,141 @@ func (h *FeedbackHandler) CreateFeedback(c *gin.Context) {
 	h.broadcastBookings()
 
 	utils.SuccessMessage(c, http.StatusCreated, "Feedback submitted successfully", gin.H{
-		"id":                  feedbackID,
-		"bookingId":           bookingID,
-		"userId":              userID,
-		"satisfactionLevel":   req.SatisfactionLevel,
-		"reason":              req.Reason,
-		"complaintItems":      req.ComplaintItems,
-		"complaintOther":      complaintOtherValue,
-		"createdAt":           now,
+		"id":                feedbackID,
+		"bookingId":         bookingID,
+		"userId":            userID,
+		"satisfactionLevel": req.SatisfactionLevel,
+		"reason":            req.Reason,
+		"complaintItems":    req.ComplaintItems,
+		"complaintOther":    complaintOtherValue,
+		"createdAt":         now,
+	})
+}
+
+// CreateFeedbackFromBody creates feedback for clients that send bookingId in the JSON body.
+// POST /api/feedbacks
+func (h *FeedbackHandler) CreateFeedbackFromBody(c *gin.Context) {
+	userID := c.GetString("userID")
+	role := c.GetString("role")
+
+	var payload createFeedbackPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		utils.Error(c, http.StatusBadRequest, "Invalid request: "+err.Error())
+		return
+	}
+
+	bookingID := strings.TrimSpace(payload.BookingID)
+	if bookingID == "" {
+		bookingID = strings.TrimSpace(payload.BookingIDSnake)
+	}
+	if bookingID == "" {
+		utils.Error(c, http.StatusBadRequest, "bookingId is required")
+		return
+	}
+
+	req := models.CreateFeedbackRequest{
+		SatisfactionLevel: payload.SatisfactionLevel,
+		Reason:            payload.Reason,
+		ComplaintItems:    payload.ComplaintItems,
+		ComplaintOther:    payload.ComplaintOther,
+	}
+
+	log.Printf("Feedback request - Booking: %s, Satisfaction: %s, Complaints: %v, Other: %v",
+		bookingID, req.SatisfactionLevel, req.ComplaintItems, req.ComplaintOther)
+
+	if req.SatisfactionLevel == string(models.SatisfactionUnsatisfied) {
+		complaintOther := ""
+		if req.ComplaintOther != nil {
+			complaintOther = strings.TrimSpace(*req.ComplaintOther)
+		}
+		if len(req.ComplaintItems) == 0 && complaintOther == "" {
+			utils.Error(c, http.StatusBadRequest, "unsatisfied feedback must include at least one complaint item or other note")
+			return
+		}
+	}
+
+	var booking models.Booking
+	err := h.db.QueryRowContext(context.Background(),
+		`SELECT b.id, b.user_id FROM bookings b WHERE b.id = ?`, bookingID).
+		Scan(&booking.ID, &booking.UserID)
+
+	if err == sql.ErrNoRows {
+		utils.Error(c, http.StatusNotFound, "Booking not found")
+		return
+	}
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "Database error: "+err.Error())
+		return
+	}
+
+	if userID == "" {
+		userID = booking.UserID
+	}
+
+	isPrivilegedRole := role == "booking" || role == "admin" || role == "superadmin"
+	if !isPrivilegedRole && booking.UserID != userID {
+		utils.Error(c, http.StatusForbidden, "You can only submit feedback for your own booking")
+		return
+	}
+
+	var existingFeedback string
+	err = h.db.QueryRowContext(context.Background(),
+		"SELECT id FROM feedbacks WHERE booking_id = ?", bookingID).
+		Scan(&existingFeedback)
+	if err != nil && err != sql.ErrNoRows {
+		utils.Error(c, http.StatusInternalServerError, "Database error: "+err.Error())
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	complaintItemsJSON, err := json.Marshal(req.ComplaintItems)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, "invalid complaint items")
+		return
+	}
+
+	var complaintOtherValue *string
+	if req.ComplaintOther != nil {
+		trimmed := strings.TrimSpace(*req.ComplaintOther)
+		if trimmed != "" {
+			complaintOtherValue = &trimmed
+		}
+	}
+
+	var feedbackID string
+	if existingFeedback != "" {
+		feedbackID = existingFeedback
+		_, err = h.db.ExecContext(context.Background(),
+			`UPDATE feedbacks SET satisfaction_level=?, reason=?, complaint_items=?, complaint_other=?, created_at=? WHERE id=?`,
+			req.SatisfactionLevel, req.Reason, string(complaintItemsJSON), complaintOtherValue, now, feedbackID)
+	} else {
+		feedbackID = uuid.New().String()
+		_, err = h.db.ExecContext(context.Background(),
+			`INSERT INTO feedbacks (id, booking_id, user_id, satisfaction_level, reason, complaint_items, complaint_other, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			feedbackID, bookingID, userID, req.SatisfactionLevel, req.Reason, string(complaintItemsJSON), complaintOtherValue, now)
+	}
+
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "Failed to create feedback: "+err.Error())
+		return
+	}
+
+	h.db.ExecContext(context.Background(),
+		`UPDATE bookings SET status = ? WHERE id = ? AND status != ?`,
+		models.StatusCompleted, bookingID, models.StatusCompleted)
+
+	h.broadcastBookings()
+
+	utils.SuccessMessage(c, http.StatusCreated, "Feedback submitted successfully", gin.H{
+		"id":                feedbackID,
+		"bookingId":         bookingID,
+		"userId":            userID,
+		"satisfactionLevel": req.SatisfactionLevel,
+		"reason":            req.Reason,
+		"complaintItems":    req.ComplaintItems,
+		"complaintOther":    complaintOtherValue,
+		"createdAt":         now,
 	})
 }
 

@@ -43,7 +43,7 @@ func (h *BookingHandler) broadcastBookings() {
 }
 
 const bookingCols = `
-	id, user_id, room_id, booking_date, check_in_time, check_out_time,
+	id, user_id, room_id, booking_date, COALESCE(end_booking_date, booking_date) AS end_booking_date, check_in_time, check_out_time,
 	number_of_guests, status, purpose,
 	rejection_reason, approved_by, approved_at,
 	room_name, room_location, room_image_url,
@@ -60,7 +60,7 @@ func scanBooking(rows interface {
 	Scan(dest ...interface{}) error
 }, b *models.Booking) error {
 	return rows.Scan(
-		&b.ID, &b.UserID, &b.RoomID, &b.BookingDate,
+		&b.ID, &b.UserID, &b.RoomID, &b.BookingDate, &b.EndBookingDate,
 		&b.CheckInTime, &b.CheckOutTime, &b.NumberOfGuests,
 		&b.Status, &b.Purpose,
 		&b.RejectionReason, &b.ApprovedBy, &b.ApprovedAt,
@@ -154,7 +154,7 @@ func (h *BookingHandler) GetBooking(c *gin.Context) {
 		return
 	}
 
-	if role != "admin" && role != "superadmin" && role != "booking" && b.UserID != currentUserID {
+	if currentUserID != "" && role != "admin" && role != "superadmin" && role != "booking" && b.UserID != currentUserID {
 		utils.Error(c, http.StatusForbidden, "access denied")
 		return
 	}
@@ -200,13 +200,24 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		return
 	}
 
+	endBookingDate := req.EndBookingDate
+	if endBookingDate == 0 {
+		endBookingDate = req.BookingDate
+	}
+	startAt, endAt, err := bookingRangeMillis(req.BookingDate, endBookingDate, req.CheckInTime, req.CheckOutTime)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	var conflictCount int
 	h.db.QueryRowContext(context.Background(),
 		`SELECT COUNT(*) FROM bookings
-		 WHERE room_id = ? AND booking_date = ?
+		 WHERE room_id = ?
 		   AND status IN ('pending', 'confirmed')
-		   AND check_in_time < ? AND check_out_time > ?`,
-		req.RoomID, req.BookingDate, req.CheckOutTime, req.CheckInTime,
+		   AND (booking_date + ((CAST(SUBSTRING(check_in_time, 1, 2) AS UNSIGNED) * 60 + CAST(SUBSTRING(check_in_time, 4, 2) AS UNSIGNED)) * 60000)) < ?
+		   AND (COALESCE(end_booking_date, booking_date) + ((CAST(SUBSTRING(check_out_time, 1, 2) AS UNSIGNED) * 60 + CAST(SUBSTRING(check_out_time, 4, 2) AS UNSIGNED)) * 60000)) > ?`,
+		req.RoomID, endAt, startAt,
 	).Scan(&conflictCount)
 	if conflictCount > 0 {
 		utils.Error(c, http.StatusConflict, "Attention : Time Slot Is Unavailable or Pending Approval ! ")
@@ -238,6 +249,7 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 		UserID:           userID,
 		RoomID:           req.RoomID,
 		BookingDate:      req.BookingDate,
+		EndBookingDate:   endBookingDate,
 		CheckInTime:      req.CheckInTime,
 		CheckOutTime:     req.CheckOutTime,
 		NumberOfGuests:   req.NumberOfGuests,
@@ -257,13 +269,13 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 	}
 
 	_, err = h.db.ExecContext(context.Background(),
-		`INSERT INTO bookings (id, user_id, room_id, booking_date, check_in_time, check_out_time,
+		`INSERT INTO bookings (id, user_id, room_id, booking_date, end_booking_date, check_in_time, check_out_time,
 		                      number_of_guests, status, purpose,
 		                      room_name, room_location, room_image_url,
 		                      booked_for_name, booked_for_company, pihak_1, pihak_2, pic_input,
 		                      user_name, user_email, created_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		booking.ID, booking.UserID, booking.RoomID, booking.BookingDate,
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		booking.ID, booking.UserID, booking.RoomID, booking.BookingDate, booking.EndBookingDate,
 		booking.CheckInTime, booking.CheckOutTime, booking.NumberOfGuests,
 		booking.Status, booking.Purpose,
 		booking.RoomName, booking.RoomLocation, booking.RoomImageURL,
@@ -280,6 +292,124 @@ func (h *BookingHandler) CreateBooking(c *gin.Context) {
 	go h.broadcastBookings()
 	utils.SuccessMessage(c, http.StatusCreated,
 		"booking submitted, waiting for admin approval", booking)
+}
+
+func (h *BookingHandler) UpdateBooking(c *gin.Context) {
+	id := c.Param("id")
+	adminID := c.GetString("userID")
+
+	var req models.UpdateBookingRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var currentStatus models.BookingStatus
+	if err := h.db.QueryRowContext(context.Background(),
+		"SELECT status FROM bookings WHERE id = ?", id).Scan(&currentStatus); err != nil {
+		utils.Error(c, http.StatusNotFound, "booking not found")
+		return
+	}
+	if currentStatus == models.StatusCancelled || currentStatus == models.StatusCompleted {
+		utils.Error(c, http.StatusBadRequest, "cancelled or completed bookings cannot be edited")
+		return
+	}
+
+	var room models.Room
+	var imageURLsJSON string
+	err := h.db.QueryRowContext(context.Background(),
+		`SELECT id, name, location, image_urls, max_guests, is_available
+		 FROM rooms WHERE id = ?`, req.RoomID).
+		Scan(&room.ID, &room.Name, &room.Location, &imageURLsJSON,
+			&room.MaxGuests, &room.IsAvailable)
+	if err != nil {
+		utils.Error(c, http.StatusNotFound, "room not found")
+		return
+	}
+	room.ImageURLs.Scan(imageURLsJSON)
+
+	if !room.IsAvailable {
+		utils.Error(c, http.StatusBadRequest, "room is not available")
+		return
+	}
+	if req.NumberOfGuests > room.MaxGuests {
+		utils.Error(c, http.StatusBadRequest, "number of guests exceeds room capacity")
+		return
+	}
+
+	endBookingDate := req.EndBookingDate
+	if endBookingDate == 0 {
+		endBookingDate = req.BookingDate
+	}
+	startAt, endAt, err := bookingRangeMillis(req.BookingDate, endBookingDate, req.CheckInTime, req.CheckOutTime)
+	if err != nil {
+		utils.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var conflictCount int
+	h.db.QueryRowContext(context.Background(),
+		`SELECT COUNT(*) FROM bookings
+		 WHERE id <> ?
+		   AND room_id = ?
+		   AND status IN ('pending', 'confirmed')
+		   AND (booking_date + ((CAST(SUBSTRING(check_in_time, 1, 2) AS UNSIGNED) * 60 + CAST(SUBSTRING(check_in_time, 4, 2) AS UNSIGNED)) * 60000)) < ?
+		   AND (COALESCE(end_booking_date, booking_date) + ((CAST(SUBSTRING(check_out_time, 1, 2) AS UNSIGNED) * 60 + CAST(SUBSTRING(check_out_time, 4, 2) AS UNSIGNED)) * 60000)) > ?`,
+		id, req.RoomID, endAt, startAt,
+	).Scan(&conflictCount)
+	if conflictCount > 0 {
+		utils.Error(c, http.StatusConflict, "Attention : Time Slot Is Unavailable or Pending Approval ! ")
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	roomImageURL := ""
+	if len(room.ImageURLs) > 0 {
+		roomImageURL = room.ImageURLs[0]
+	}
+
+	pihak1 := req.Pihak1
+	if pihak1 == nil {
+		pihak1 = req.ParaPihak
+	}
+	pihak2 := req.Pihak2
+	if pihak2 == nil {
+		pihak2 = req.Divisi
+	}
+
+	_, err = h.db.ExecContext(context.Background(),
+		`UPDATE bookings
+		 SET room_id = ?, booking_date = ?, end_booking_date = ?,
+		     check_in_time = ?, check_out_time = ?, number_of_guests = ?,
+		     purpose = ?, room_name = ?, room_location = ?, room_image_url = ?,
+		     booked_for_name = ?, booked_for_company = ?, pihak_1 = ?, pihak_2 = ?,
+		     pic_input = ?, updated_at = ?
+		 WHERE id = ?`,
+		req.RoomID, req.BookingDate, endBookingDate,
+		req.CheckInTime, req.CheckOutTime, req.NumberOfGuests,
+		req.Purpose, room.Name, room.Location, roomImageURL,
+		req.BookedForName, req.BookedForCompany, pihak1, pihak2,
+		req.PicInput, now, id,
+	)
+	if err != nil {
+		utils.Error(c, http.StatusInternalServerError, "failed to update booking")
+		return
+	}
+
+	h.recordHistory(id, string(currentStatus), string(currentStatus), adminID, "booking edited by admin")
+	go h.broadcastBookings()
+
+	var updated models.Booking
+	if err := scanBooking(
+		h.db.QueryRowContext(context.Background(),
+			"SELECT "+bookingCols+" FROM bookings WHERE id = ?", id),
+		&updated,
+	); err != nil {
+		utils.SuccessMessage(c, http.StatusOK, "booking updated", gin.H{"id": id})
+		return
+	}
+
+	utils.SuccessMessage(c, http.StatusOK, "booking updated", updated)
 }
 
 func (h *BookingHandler) ApproveBooking(c *gin.Context) {
@@ -448,7 +578,7 @@ func (h *BookingHandler) UpdateCheckInCheckOut(c *gin.Context) {
 
 	isAdmin := role == "admin" || role == "superadmin"
 	isBookingRole := role == "booking" // kiosk operator can check-in any booking
-	if !isAdmin && !isBookingRole && ownerID != currentUserID {
+	if currentUserID != "" && !isAdmin && !isBookingRole && ownerID != currentUserID {
 		utils.Error(c, http.StatusForbidden, "access denied")
 		return
 	}
@@ -517,7 +647,11 @@ func (h *BookingHandler) UpdateCheckInCheckOut(c *gin.Context) {
 		_, err2 := h.db.ExecContext(context.Background(),
 			"UPDATE bookings SET status='completed', updated_at=? WHERE id = ?", now2, id)
 		if err2 == nil {
-			h.recordHistory(id, string(status), string(models.StatusCompleted), currentUserID, "auto-completed by user on checkout")
+			changedBy := currentUserID
+			if changedBy == "" {
+				changedBy = ownerID
+			}
+			h.recordHistory(id, string(status), string(models.StatusCompleted), changedBy, "auto-completed by user on checkout")
 			go h.broadcastBookings()
 			utils.SuccessMessage(c, http.StatusOK, "check-in/check-out updated and booking completed", gin.H{
 				"id":                    id,
@@ -550,11 +684,11 @@ func (h *BookingHandler) GetRoomBookings(c *gin.Context) {
 	if dateStr != "" {
 		dateMs, err := strconv.ParseInt(dateStr, 10, 64)
 		if err == nil {
-			query += " AND booking_date = ?"
-			args = append(args, dateMs)
+			query += " AND booking_date <= ? AND COALESCE(end_booking_date, booking_date) >= ?"
+			args = append(args, dateMs, dateMs)
 		}
 	}
-	query += " ORDER BY check_in_time ASC"
+	query += " ORDER BY booking_date ASC, check_in_time ASC"
 
 	rows, err := h.db.QueryContext(context.Background(), query, args...)
 	if err != nil {
@@ -623,6 +757,33 @@ func parseTimeToMinutes(value string) (int, error) {
 		return 0, err
 	}
 	return parsed.Hour()*60 + parsed.Minute(), nil
+}
+
+func bookingRangeMillis(startDate, endDate int64, checkInTime, checkOutTime string) (int64, int64, error) {
+	startMinutes, err := parseTimeToMinutes(checkInTime)
+	if err != nil {
+		return 0, 0, err
+	}
+	endMinutes, err := parseTimeToMinutes(checkOutTime)
+	if err != nil {
+		return 0, 0, err
+	}
+	if endDate < startDate {
+		return 0, 0, errInvalidBookingRange("tanggal keluar tidak boleh sebelum tanggal masuk")
+	}
+
+	startAt := startDate + int64(startMinutes)*60_000
+	endAt := endDate + int64(endMinutes)*60_000
+	if endAt <= startAt {
+		return 0, 0, errInvalidBookingRange("tanggal/jam keluar harus lebih besar dari tanggal/jam masuk")
+	}
+	return startAt, endAt, nil
+}
+
+type errInvalidBookingRange string
+
+func (e errInvalidBookingRange) Error() string {
+	return string(e)
 }
 
 func nullableString(value string) interface{} {

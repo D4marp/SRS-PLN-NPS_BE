@@ -9,6 +9,7 @@ import (
 )
 
 type Config struct {
+	Host              string // bind address, e.g. 0.0.0.0 for LAN access
 	Port              string
 	DatabaseURL       string
 	JWTSecret         string
@@ -16,8 +17,17 @@ type Config struct {
 	UploadsDir        string
 	BaseURL           string
 	AllowedOrigins    []string
-	SuperAdminEmail   string
+	SuperAdminEmail    string
 	SuperAdminPassword string
+	AdminEmail         string
+	AdminPassword      string
+	AdminName          string
+	BookingEmail       string
+	BookingPassword    string
+	BookingName        string
+	SuperAdmin2Email   string
+	SuperAdmin2Password string
+	SuperAdmin2Name    string
 }
 
 func Load() *Config {
@@ -37,6 +47,7 @@ func Load() *Config {
 	}
 
 	return &Config{
+		Host:              getEnv("HOST", "0.0.0.0"),
 		Port:              getEnv("PORT", "8080"),
 		DatabaseURL:       databaseURL,
 		JWTSecret:         getEnv("JWT_SECRET", "change-this-secret-in-production"),
@@ -44,8 +55,17 @@ func Load() *Config {
 		UploadsDir:        getEnv("UPLOADS_DIR", "./uploads"),
 		BaseURL:           getEnv("BASE_URL", "http://localhost:8080"),
 		AllowedOrigins:    []string{getEnv("ALLOWED_ORIGINS", "*")},
-		SuperAdminEmail:   getEnv("SUPERADMIN_EMAIL", ""),
+		SuperAdminEmail:    getEnv("SUPERADMIN_EMAIL", ""),
 		SuperAdminPassword: getEnv("SUPERADMIN_PASSWORD", ""),
+		AdminEmail:          getEnv("ADMIN_EMAIL", ""),
+		AdminPassword:       getEnv("ADMIN_PASSWORD", ""),
+		AdminName:           getEnv("ADMIN_NAME", "Admin"),
+		BookingEmail:        getEnv("BOOKING_EMAIL", ""),
+		BookingPassword:     getEnv("BOOKING_PASSWORD", ""),
+		BookingName:         getEnv("BOOKING_NAME", "Petugas Booking"),
+		SuperAdmin2Email:    getEnv("SUPERADMIN2_EMAIL", ""),
+		SuperAdmin2Password: getEnv("SUPERADMIN2_PASSWORD", ""),
+		SuperAdmin2Name:     getEnv("SUPERADMIN2_NAME", "Super Admin PLN"),
 	}
 }
 

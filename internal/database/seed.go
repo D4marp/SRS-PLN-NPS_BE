@@ -9,16 +9,17 @@ import (
 	"github.com/google/uuid"
 )
 
-func SeedSuperAdmin(db *sql.DB, email, password, name string) error {
+func seedUserIfMissing(db *sql.DB, email, password, name, role string) error {
 	if email == "" || password == "" {
-		log.Println("[seed] SUPERADMIN_EMAIL or SUPERADMIN_PASSWORD not set, skipping")
 		return nil
 	}
 
 	var exists bool
-	db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", email).Scan(&exists)
+	if err := db.QueryRow("SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", email).Scan(&exists); err != nil {
+		return err
+	}
 	if exists {
-		log.Printf("[seed] superadmin %s already exists, skipping", email)
+		log.Printf("[seed] %s %s already exists, skipping", role, email)
 		return nil
 	}
 
@@ -30,13 +31,54 @@ func SeedSuperAdmin(db *sql.DB, email, password, name string) error {
 	now := time.Now().UnixMilli()
 	_, err = db.Exec(
 		`INSERT INTO users (id, name, email, password, role, created_at)
-		 VALUES (?, ?, ?, ?, 'superadmin', ?)`,
-		uuid.New().String(), name, email, hashed, now,
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		uuid.New().String(), name, email, hashed, role, now,
 	)
 	if err != nil {
 		return err
 	}
 
-	log.Printf("[seed] superadmin %s created successfully", email)
+	log.Printf("[seed] %s %s created successfully", role, email)
 	return nil
+}
+
+func SeedSuperAdmin(db *sql.DB, email, password, name string) error {
+	if email == "" || password == "" {
+		log.Println("[seed] SUPERADMIN_EMAIL or SUPERADMIN_PASSWORD not set, skipping")
+		return nil
+	}
+	return seedUserIfMissing(db, email, password, name, "superadmin")
+}
+
+func SeedAdmin(db *sql.DB, email, password, name string) error {
+	if email == "" || password == "" {
+		log.Println("[seed] ADMIN_EMAIL or ADMIN_PASSWORD not set, skipping")
+		return nil
+	}
+	if name == "" {
+		name = "Admin"
+	}
+	return seedUserIfMissing(db, email, password, name, "admin")
+}
+
+func SeedBooking(db *sql.DB, email, password, name string) error {
+	if email == "" || password == "" {
+		log.Println("[seed] BOOKING_EMAIL or BOOKING_PASSWORD not set, skipping")
+		return nil
+	}
+	if name == "" {
+		name = "Petugas Booking"
+	}
+	return seedUserIfMissing(db, email, password, name, "booking")
+}
+
+// SeedSuperAdminExtra creates an additional superadmin (SUPERADMIN2_*), if configured.
+func SeedSuperAdminExtra(db *sql.DB, email, password, name string) error {
+	if email == "" || password == "" {
+		return nil
+	}
+	if name == "" {
+		name = "Super Admin"
+	}
+	return seedUserIfMissing(db, email, password, name, "superadmin")
 }

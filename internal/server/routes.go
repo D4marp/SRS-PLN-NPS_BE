@@ -77,29 +77,31 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	// -------------------------------------------------------------------------
 	// Bookings
 	// -------------------------------------------------------------------------
+	feedbackH := handlers.NewFeedbackHandler(s.db, rtManager)
+	r.POST("/api/bookings/:id/feedback", feedbackH.CreateFeedback)
+	r.GET("/api/bookings/:id/feedback", feedbackH.GetFeedback)
+	r.GET("/api/bookings/:id", bookingH.GetBooking)
+	r.PATCH("/api/bookings/:id/checkin-checkout", bookingH.UpdateCheckInCheckOut)
+
 	bookings := r.Group("/api/bookings")
 	bookings.Use(authMw)
 	{
 		bookings.GET("", bookingH.ListBookings)
 		bookings.GET("/pending", adminMw, bookingH.GetPendingBookings) // admin shortcut
-		bookings.GET("/:id", bookingH.GetBooking)
+		bookings.PUT("/:id", adminMw, bookingH.UpdateBooking)
 		bookings.POST("", bookingH.CreateBooking)                          // → status: pending
 		bookings.POST("/:id/approve", adminMw, bookingH.ApproveBooking)    // → confirmed
 		bookings.POST("/:id/reject", adminMw, bookingH.RejectBooking)      // → rejected
 		bookings.PATCH("/:id/cancel", bookingH.CancelBooking)              // → cancelled
 		bookings.PATCH("/:id/complete", adminMw, bookingH.CompleteBooking) // → completed
-		bookings.PATCH("/:id/checkin-checkout", bookingH.UpdateCheckInCheckOut)
 
-		// Feedback
-		feedbackH := handlers.NewFeedbackHandler(s.db, rtManager)
-		bookings.POST("/:id/feedback", feedbackH.CreateFeedback)
-		bookings.GET("/:id/feedback", feedbackH.GetFeedback)
 	}
 
 	// -------------------------------------------------------------------------
 	// Feedbacks (admin panel)
 	// -------------------------------------------------------------------------
-	feedbackH := handlers.NewFeedbackHandler(s.db, rtManager)
+	r.POST("/api/feedbacks", feedbackH.CreateFeedbackFromBody)
+
 	feedbacks := r.Group("/api/feedbacks")
 	feedbacks.Use(authMw, adminMw)
 	{

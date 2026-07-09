@@ -22,6 +22,7 @@ type Booking struct {
 	UserID          string        `json:"userId" db:"user_id"`
 	RoomID          string        `json:"roomId" db:"room_id"`
 	BookingDate     int64         `json:"bookingDate" db:"booking_date"`
+	EndBookingDate  int64         `json:"endBookingDate" db:"end_booking_date"`
 	CheckInTime     string        `json:"checkInTime" db:"check_in_time"`
 	CheckOutTime    string        `json:"checkOutTime" db:"check_out_time"`
 	NumberOfGuests  int           `json:"numberOfGuests" db:"number_of_guests"`
@@ -53,6 +54,7 @@ type Booking struct {
 type CreateBookingRequest struct {
 	RoomID           string  `json:"roomId" binding:"required"`
 	BookingDate      int64   `json:"bookingDate" binding:"required"`
+	EndBookingDate   int64   `json:"endBookingDate"`
 	CheckInTime      string  `json:"checkInTime" binding:"required"`
 	CheckOutTime     string  `json:"checkOutTime" binding:"required"`
 	NumberOfGuests   int     `json:"numberOfGuests" binding:"required,min=1"`
@@ -65,6 +67,8 @@ type CreateBookingRequest struct {
 	Purpose          *string `json:"purpose"`
 	PicInput         *string `json:"picInput"`
 }
+
+type UpdateBookingRequest = CreateBookingRequest
 
 type ApproveBookingRequest struct {
 	Note *string `json:"note"`
