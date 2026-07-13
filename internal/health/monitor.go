@@ -1,9 +1,12 @@
 package health
 
 import (
+	"context"
 	"hash/crc32"
 	"net"
 	"net/http"
+	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -111,7 +114,8 @@ func (m *Monitor) Record(c *gin.Context, req PingRequest) ClientStatus {
 
 func (m *Monitor) Snapshot() gin.H {
 	now := time.Now()
-	clients := m.clientsSnapshot(now)
+	probes := probeRoomDevices()
+	clients := m.clientsSnapshot(now, probes)
 	summary := map[string]gin.H{}
 	for _, client := range clients {
 		item, ok := summary[client.Type]
@@ -143,19 +147,46 @@ func (m *Monitor) Summary() gin.H {
 	}
 }
 
-func (m *Monitor) clientsSnapshot(now time.Time) []ClientStatus {
+func (m *Monitor) clientsSnapshot(now time.Time, probes map[string]bool) []ClientStatus {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	clients := make([]ClientStatus, 0, len(m.clients))
+	clients := make([]ClientStatus, 0, len(m.clients)+len(roomDevices()))
+	seenRooms := map[string]bool{}
 	for _, item := range m.clients {
 		copy := *item
 		lastSeen := time.UnixMilli(copy.LastSeen)
 		copy.AgeSeconds = int64(now.Sub(lastSeen).Seconds())
 		copy.Online = now.Sub(lastSeen) <= onlineWindow
+		if copy.Type == "mobile" && copy.RoomName != "" {
+			if online, ok := probes[copy.IP]; ok {
+				copy.Online = online
+				seenRooms[copy.IP] = true
+			}
+		}
 		clients = append(clients, copy)
 	}
+	for _, room := range roomDevices() {
+		if seenRooms[room.IP] {
+			continue
+		}
+		clients = append(clients, ClientStatus{
+			ID:       room.Name,
+			Type:     "mobile",
+			Name:     room.Name,
+			RoomName: room.Name,
+			IP:       room.IP,
+			LastPath: "network ping",
+			Online:   probes[room.IP],
+		})
+	}
 	sort.Slice(clients, func(i, j int) bool {
+		if clients[i].Online != clients[j].Online {
+			return clients[i].Online
+		}
+		if clients[i].RoomName != "" || clients[j].RoomName != "" {
+			return clients[i].RoomName < clients[j].RoomName
+		}
 		return clients[i].LastSeen > clients[j].LastSeen
 	})
 	return clients
@@ -206,17 +237,64 @@ func defaultName(clientType, ip string) string {
 }
 
 func roomNameByIP(ip string) string {
-	rooms := map[string]string{
-		"10.7.41.44": "governor",
-		"10.7.41.37": "boiler",
-		"10.7.41.26": "msv",
-		"10.7.41.59": "tab reseptionis",
-		"10.7.41.35": "generator",
-		"10.7.41.33": "generator2",
-		"10.7.41.60": "turbin",
-		"10.7.41.61": "hall",
+	for _, room := range roomDevices() {
+		if room.IP == ip {
+			return room.Name
+		}
 	}
-	return rooms[ip]
+	return ""
+}
+
+type roomDevice struct {
+	Name string
+	IP   string
+}
+
+func roomDevices() []roomDevice {
+	return []roomDevice{
+		{Name: "governor", IP: "10.7.41.44"},
+		{Name: "boiler", IP: "10.7.41.37"},
+		{Name: "msv", IP: "10.7.41.26"},
+		{Name: "tab reseptionis", IP: "10.7.41.59"},
+		{Name: "generator", IP: "10.7.41.35"},
+		{Name: "generator2", IP: "10.7.41.33"},
+		{Name: "turbin", IP: "10.7.41.60"},
+		{Name: "hall", IP: "10.7.41.61"},
+	}
+}
+
+func probeRoomDevices() map[string]bool {
+	devices := roomDevices()
+	results := make(map[string]bool, len(devices))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, device := range devices {
+		wg.Add(1)
+		go func(ip string) {
+			defer wg.Done()
+			online := pingIP(ip)
+			mu.Lock()
+			results[ip] = online
+			mu.Unlock()
+		}(device.IP)
+	}
+
+	wg.Wait()
+	return results
+}
+
+func pingIP(ip string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	defer cancel()
+
+	args := []string{"-c", "1", "-W", "1", ip}
+	if runtime.GOOS == "windows" {
+		args = []string{"-n", "1", "-w", "1000", ip}
+	}
+
+	cmd := exec.CommandContext(ctx, "ping", args...)
+	return cmd.Run() == nil
 }
 
 func inferredClientID(clientType, ip, ua string) string {

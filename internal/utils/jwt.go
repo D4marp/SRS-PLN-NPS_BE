@@ -14,16 +14,11 @@ type Claims struct {
 }
 
 func GenerateToken(userID, role, secret, expiry string) (string, error) {
-	duration, err := time.ParseDuration(expiry)
-	if err != nil {
-		duration = 168 * time.Hour
-	}
 	claims := Claims{
 		UserID: userID,
 		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			IssuedAt: jwt.NewNumericDate(time.Now()),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -31,7 +26,8 @@ func GenerateToken(userID, role, secret, expiry string) (string, error) {
 }
 
 func ValidateToken(tokenStr, secret string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
+	parser := jwt.NewParser(jwt.WithoutClaimsValidation())
+	token, err := parser.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
 		}

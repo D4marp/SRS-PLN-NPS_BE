@@ -80,13 +80,13 @@ func (s *Server) registerRoutes(r *gin.Engine) {
 	feedbackH := handlers.NewFeedbackHandler(s.db, rtManager)
 	r.POST("/api/bookings/:id/feedback", feedbackH.CreateFeedback)
 	r.GET("/api/bookings/:id/feedback", feedbackH.GetFeedback)
+	r.GET("/api/bookings", bookingH.ListBookings)
 	r.GET("/api/bookings/:id", bookingH.GetBooking)
 	r.PATCH("/api/bookings/:id/checkin-checkout", bookingH.UpdateCheckInCheckOut)
 
 	bookings := r.Group("/api/bookings")
 	bookings.Use(authMw)
 	{
-		bookings.GET("", bookingH.ListBookings)
 		bookings.GET("/pending", adminMw, bookingH.GetPendingBookings) // admin shortcut
 		bookings.PUT("/:id", adminMw, bookingH.UpdateBooking)
 		bookings.POST("", bookingH.CreateBooking)                          // → status: pending
