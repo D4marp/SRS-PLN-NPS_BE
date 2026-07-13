@@ -89,9 +89,13 @@ func (h *WSHandler) WatchRooms(c *gin.Context) {
 func (h *WSHandler) WatchBookings(c *gin.Context) {
 	token := c.Query("token")
 	claims, err := utils.ValidateToken(token, h.secret)
+	userID := ""
+	role := "admin"
 	if err != nil {
-		log.Printf("ws bookings token invalid, continuing with admin feed: %v", err)
-		claims = &utils.Claims{Role: "admin"}
+		log.Printf("WS Bookings: token invalid/expired/empty (%v). Enabling Kiosk Mode (public booking feed).", err)
+	} else {
+		userID = claims.UserID
+		role = claims.Role
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -104,15 +108,15 @@ func (h *WSHandler) WatchBookings(c *gin.Context) {
 		Conn: conn,
 		Send: make(chan []byte, 256),
 		Filter: map[string]string{
-			"userId": claims.UserID,
-			"role":   claims.Role,
+			"userId": userID,
+			"role":   role,
 		},
 	}
 
 	h.manager.Bookings.Register(client)
 	defer h.manager.Bookings.Unregister(client)
 
-	bookings := h.fetchBookings(claims.UserID, claims.Role)
+	bookings := h.fetchBookings(userID, role)
 	if data, err := json.Marshal(realtime.WSMessage{Type: "initial", Data: bookings}); err == nil {
 		conn.WriteMessage(websocket.TextMessage, data)
 	}
