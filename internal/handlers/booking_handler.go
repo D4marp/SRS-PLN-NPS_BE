@@ -681,6 +681,12 @@ func (h *BookingHandler) GetRoomBookings(c *gin.Context) {
 	          WHERE room_id = ? AND status IN ('pending', 'confirmed')`
 	args := []interface{}{roomID}
 
+	if dateStr == "" {
+		today := time.Now()
+		todayOnly := time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
+		dateStr = strconv.FormatInt(todayOnly.UnixMilli(), 10)
+	}
+
 	if dateStr != "" {
 		dateMs, err := strconv.ParseInt(dateStr, 10, 64)
 		if err == nil {
